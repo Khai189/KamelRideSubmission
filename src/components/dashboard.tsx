@@ -165,20 +165,19 @@ function buildXAxisTickIndices(pointCount: number, compact: boolean) {
   return Array.from(new Set([0, Math.round(lastIndex / 2), lastIndex]));
 }
 
-function calculateDeltaLabel(points: TrendSeriesPoint[]) {
+function calculateTrendLabel(points: TrendSeriesPoint[]) {
   if (points.length < 2) {
     return "+0.0%";
   }
 
-  const midpoint = Math.max(Math.floor(points.length / 2), 1);
-  const previousTotal = sumValues(points.slice(0, midpoint));
-  const currentTotal = sumValues(points.slice(midpoint));
+  const firstValue = points[0].value;
+  const lastValue = points[points.length - 1].value;
 
-  if (previousTotal === 0) {
+  if (firstValue === 0) {
     return "+0.0%";
   }
 
-  const delta = ((currentTotal - previousTotal) / previousTotal) * 100;
+  const delta = ((lastValue - firstValue) / firstValue) * 100;
   const sign = delta >= 0 ? "+" : "";
 
   return `${sign}${delta.toFixed(1)}%`;
@@ -502,8 +501,10 @@ export function Dashboard({ data }: DashboardProps) {
   const revenuePeak = peakPoint(revenueTrend);
   const profitPeak = peakPoint(profitTrend);
   const totalExitSessions = sumValues(data.exitJourney);
+  const selectedMetricDelta = calculateTrendLabel(metricTrend);
   const selectedBounceAverage = formatPercentValue(averageValue(bounceTrend));
-  const selectedRevenueDelta = calculateDeltaLabel(revenueTrend);
+  const selectedRevenueDelta = calculateTrendLabel(revenueTrend);
+  const selectedProfitDelta = calculateTrendLabel(profitTrend);
   const selectedMargin =
     sumValues(revenueTrend) === 0
       ? "0.0% margin"
@@ -591,7 +592,7 @@ export function Dashboard({ data }: DashboardProps) {
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div>
                 <p className="text-[0.66rem] font-bold uppercase tracking-[0.18em] text-slate-500">
-                  Selected Window
+                  Selected Window · {formatRangeLabel(metricRange)}
                 </p>
                 <strong className="mt-1 block text-[clamp(1.8rem,3vw,2.5rem)] font-semibold tracking-[-0.05em] text-slate-900">
                   {formatMetricAggregate(activeMetric, metricTrend)}
@@ -599,7 +600,7 @@ export function Dashboard({ data }: DashboardProps) {
               </div>
               <div className="flex flex-wrap gap-2">
                 <span className="inline-flex rounded-full bg-blue-500/12 px-3 py-2 text-[0.76rem] font-semibold text-blue-700">
-                  {currentMetric.delta}
+                  {selectedMetricDelta}
                 </span>
                 <span className="inline-flex rounded-full bg-white/85 px-3 py-2 text-[0.76rem] font-semibold text-slate-700">
                   Peak {metricPeak.label}
@@ -665,7 +666,7 @@ export function Dashboard({ data }: DashboardProps) {
           <div className="mb-5 grid gap-2 sm:grid-cols-2">
             <div className="rounded-2xl bg-slate-900/4 px-4 py-3">
               <p className="text-[0.66rem] font-bold uppercase tracking-[0.18em] text-slate-500">
-                Window Average
+                Window Average · {formatRangeLabel(bounceRange)}
               </p>
               <strong className="mt-1 block text-base font-semibold text-slate-900">
                 {formatPercentValue(averageValue(bounceTrend))}
@@ -763,7 +764,7 @@ export function Dashboard({ data }: DashboardProps) {
           <div className="mb-4 flex flex-wrap items-end justify-between gap-3 rounded-[22px] bg-[linear-gradient(135deg,rgba(16,185,129,0.08),rgba(255,255,255,0.9))] p-4">
             <div>
               <p className="text-[0.66rem] font-bold uppercase tracking-[0.18em] text-slate-500">
-                Selected Revenue
+                Selected Revenue · {formatRangeLabel(financeRange)}
               </p>
               <strong className="mt-1 block text-[clamp(1.3rem,1.8vw,1.7rem)] font-semibold tracking-[-0.05em] text-slate-900">
                 {currencyFormatter.format(sumValues(revenueTrend))}
@@ -827,14 +828,14 @@ export function Dashboard({ data }: DashboardProps) {
           <div className="mb-4 flex flex-wrap items-end justify-between gap-3 rounded-[22px] bg-[linear-gradient(135deg,rgba(37,99,235,0.08),rgba(255,255,255,0.9))] p-4">
             <div>
               <p className="text-[0.66rem] font-bold uppercase tracking-[0.18em] text-slate-500">
-                Selected Profit
+                Selected Profit · {formatRangeLabel(financeRange)}
               </p>
               <strong className="mt-1 block text-[clamp(1.3rem,1.8vw,1.7rem)] font-semibold tracking-[-0.05em] text-slate-900">
                 {currencyFormatter.format(sumValues(profitTrend))}
               </strong>
             </div>
             <span className="inline-flex rounded-full bg-white/85 px-3 py-2 text-[0.76rem] font-semibold text-slate-700">
-              {data.finance.profit.delta}
+              {selectedProfitDelta}
             </span>
           </div>
 
