@@ -11,30 +11,68 @@ type DashboardProps = {
 };
 
 type TrendSeriesPoint = DashboardData["bounceRateSeries"][number];
+type RangeKey = "7d" | "14d";
+type JourneyMetricKey = "sessions" | "share";
+type PageMetricKey = "visits" | "share";
+
+type SelectOption<T extends string> = {
+  label: string;
+  value: T;
+};
 
 type TimeSeriesChartProps = {
+  compact?: boolean;
   points: TrendSeriesPoint[];
   lineColor: string;
   fillColor: string;
   valueFormatter: (value: number) => string;
 };
 
+type HoverBarListItem = {
+  helperText: string;
+  label: string;
+  value: number;
+  valueLabel: string;
+};
+
+type HoverBarListProps = {
+  accentClass: string;
+  items: HoverBarListItem[];
+  widthBase?: number;
+  title: string;
+};
+
 const metricLabels: Record<MetricKey, string> = {
   clicks: "Web Clicks",
-  impressions: "Impressions",
+  impressions: "Imprs.",
   ctr: "CTR"
 };
 
 const metricKeys: MetricKey[] = ["clicks", "impressions", "ctr"];
 
+const rangeOptions: SelectOption<RangeKey>[] = [
+  { label: "Last 7 days", value: "7d" },
+  { label: "Last 14 days", value: "14d" }
+];
+
+const journeyMetricOptions: SelectOption<JourneyMetricKey>[] = [
+  { label: "Depth by sessions", value: "sessions" },
+  { label: "Depth by share", value: "share" }
+];
+
+const pageMetricOptions: SelectOption<PageMetricKey>[] = [
+  { label: "Pages by visits", value: "visits" },
+  { label: "Pages by share", value: "share" }
+];
+
 const panelClass =
-  "rounded-[28px] border border-white/70 bg-white/80 p-5 shadow-[0_22px_55px_rgba(24,33,45,0.12)] backdrop-blur-md sm:p-6";
+  "relative z-0 rounded-[28px] border border-white/70 bg-white/80 p-5 shadow-[0_22px_55px_rgba(24,33,45,0.12)] backdrop-blur-md transition-[z-index] hover:z-10 focus-within:z-10 sm:p-6";
 
 const eyebrowClass =
-  "mb-2 text-[0.72rem] font-bold uppercase tracking-[0.22em] text-slate-500";
+  "mb-2 text-[0.7rem] font-bold uppercase tracking-[0.22em] text-slate-500";
 
 const badgeClass =
-  "inline-flex whitespace-nowrap rounded-full px-3 py-2 text-[0.82rem] font-semibold";
+  "inline-flex whitespace-nowrap rounded-full px-3 py-2 text-[0.78rem] font-semibold";
 
 const compactNumberFormatter = new Intl.NumberFormat("en-US", {
   notation: "compact",
@@ -47,15 +85,26 @@ const currencyFormatter = new Intl.NumberFormat("en-US", {
   maximumFractionDigits: 0
 });
 
-function averageValue(points: DashboardData["bounceRateSeries"]) {
-  const total = points.reduce((sum, point) => sum + point.value, 0);
-  return total / Math.max(points.length, 1);
+function sumValues(points: TrendSeriesPoint[]) {
+  return points.reduce((sum, point) => sum + point.value, 0);
 }
 
-function peakPoint(points: DashboardData["bounceRateSeries"]) {
+function averageValue(points: TrendSeriesPoint[]) {
+  return sumValues(points) / Math.max(points.length, 1);
+}
+
+function peakPoint(points: TrendSeriesPoint[]) {
   return points.reduce((peak, point) =>
     point.value > peak.value ? point : peak
   );
+}
+
+function slicePoints(points: TrendSeriesPoint[], range: RangeKey) {
+  if (range === "7d") {
+    return points.slice(-7);
+  }
+
+  return points;
 }
 
 function formatMetricValue(metric: MetricKey, value: number) {
@@ -70,56 +119,165 @@ function formatPercentValue(value: number) {
   return `${value.toFixed(1)}%`;
 }
 
+function formatMetricAggregate(metric: MetricKey, points: TrendSeriesPoint[]) {
+  if (metric === "ctr") {
+    return formatPercentValue(averageValue(points));
+  }
+
+  return compactNumberFormatter.format(sumValues(points));
+}
+
+function formatRangeLabel(range: RangeKey) {
+  return range === "7d" ? "Last 7 days" : "Last 14 days";
+}
+
+function buildAxisTicks(maxValue: number) {
+  const safeMaxValue = Math.max(maxValue, 1);
+  const roughStep = safeMaxValue / 4;
+  const scale = 10 ** Math.floor(Math.log10(Math.max(roughStep, 1)));
+  const base = scale / 10;
+  const stepCandidates = [5, 10, 25, 50, 100].map(
+    (multiplier) => multiplier * base
+  );
+  const step =
+    stepCandidates.find((candidate) => candidate >= roughStep) ??
+    stepCandidates[stepCandidates.length - 1];
+  const axisMax = step * 4;
+  const ticks = Array.from({ length: 5 }, (_, index) => axisMax - step * index);
+
+  return {
+    axisMax,
+    ticks
+  };
+}
+
+function buildXAxisTickIndices(pointCount: number, compact: boolean) {
+  const lastIndex = pointCount - 1;
+
+  if (lastIndex <= 0) {
+    return [0];
+  }
+
+  const targetLabelCount = compact ? 3 : 4;
+  const gap = lastIndex / (targetLabelCount - 1);
+  const indices = Array.from({ length: targetLabelCount }, (_, index) =>
+    Math.round(index * gap)
+  );
+
+  return Array.from(new Set(indices));
+}
+
+function DashboardSelect<T extends string>({
+  ariaLabel,
+  onChange,
+  options,
+  value
+}: {
+  ariaLabel: string;
+  onChange: (value: T) => void;
+  options: SelectOption<T>[];
+  value: T;
+}) {
+  return (
+    <select
+      aria-label={ariaLabel}
+      className="rounded-full border border-slate-200 bg-white px-3 py-2 text-[0.78rem] font-medium text-slate-600 outline-none transition hover:border-slate-300 focus:border-slate-400"
+      onChange={(event) => onChange(event.target.value as T)}
+      value={value}
+    >
+      {options.map((option) => (
+        <option key={option.value} value={option.value}>
+          {option.label}
+        </option>
+      ))}
+    </select>
+  );
+}
+
 function TimeSeriesChart({
+  compact = false,
   points,
   lineColor,
   fillColor,
   valueFormatter
 }: TimeSeriesChartProps) {
+  const [hoveredIndex, setHoveredIndex] = useState(points.length - 1);
+
+  const chartPixelHeight = compact ? 148 : 204;
   const maxValue = Math.max(...points.map((point) => point.value), 1);
-  const left = 6;
+  const { axisMax, ticks: yTicks } = buildAxisTicks(maxValue);
+  const left = 7;
   const right = 2;
   const top = 10;
   const bottom = 14;
   const chartWidth = 100 - left - right;
   const chartHeight = 100 - top - bottom;
+  const safeHoveredIndex = Math.min(hoveredIndex, points.length - 1);
 
   const coordinates = points.map((point, index) => {
     const x =
       points.length === 1 ? left : left + (index / (points.length - 1)) * chartWidth;
-    const y = top + chartHeight - (point.value / maxValue) * chartHeight;
+    const y = top + chartHeight - (point.value / axisMax) * chartHeight;
 
     return { ...point, x, y };
   });
 
+  const activePoint = coordinates[safeHoveredIndex];
+  const firstPoint = coordinates[0];
+  const lastPoint = coordinates[coordinates.length - 1];
   const linePath = coordinates
     .map((point, index) => `${index === 0 ? "M" : "L"} ${point.x} ${point.y}`)
     .join(" ");
-
-  const firstPoint = coordinates[0];
-  const lastPoint = coordinates[coordinates.length - 1];
   const areaPath = `${linePath} L ${lastPoint.x} ${100 - bottom} L ${firstPoint.x} ${100 - bottom} Z`;
-  const yTicks = [maxValue, maxValue * 0.66, maxValue * 0.33, 0];
-  const xTickIndices = Array.from(
-    new Set([
-      0,
-      Math.floor((points.length - 1) / 3),
-      Math.floor((2 * (points.length - 1)) / 3),
-      points.length - 1
-    ])
-  );
+  const xTickIndices = buildXAxisTickIndices(points.length, compact);
 
   return (
-    <div className="rounded-[24px] border border-slate-900/8 bg-slate-50/80 p-4">
-      <div className="grid grid-cols-[auto_1fr] gap-3">
-        <div className="flex h-[220px] flex-col justify-between pb-8 text-[0.7rem] font-medium text-slate-400">
+    <div
+      className={
+        compact
+          ? "relative z-0 mx-auto w-full max-w-[27rem] overflow-visible rounded-[24px] border border-slate-900/8 bg-slate-50/80 p-3 hover:z-20 focus-within:z-20"
+          : "relative z-0 overflow-visible rounded-[24px] border border-slate-900/8 bg-slate-50/80 p-3.5 hover:z-20 focus-within:z-20"
+      }
+    >
+      <div className="mb-2 flex items-center justify-between text-[0.62rem] font-medium text-slate-400">
+        <span>Hover to inspect</span>
+        <span>{activePoint.label}</span>
+      </div>
+
+      <div className="grid grid-cols-[auto_1fr] gap-2.5">
+        <div
+          className="flex flex-col justify-between pb-5 text-[0.58rem] font-medium text-slate-400"
+          style={{ height: chartPixelHeight }}
+        >
           {yTicks.map((tick, index) => (
             <span key={`${tick}-${index}`}>{valueFormatter(tick)}</span>
           ))}
         </div>
 
-        <div>
-          <div className="relative h-[220px] overflow-hidden rounded-[20px] border border-slate-200/80 bg-white">
+        <div className="relative overflow-visible">
+          <div
+            className="pointer-events-none absolute inset-x-0 top-0 z-30 overflow-visible"
+            style={{ height: chartPixelHeight }}
+          >
+            <div
+              className="absolute rounded-xl bg-slate-900 px-3 py-2 text-[0.64rem] font-medium text-white shadow-[0_12px_30px_rgba(15,23,42,0.28)]"
+              style={{
+                left: `${activePoint.x}%`,
+                top: `${Math.max(activePoint.y - 6, 10)}%`,
+                transform: "translate(-50%, -100%)"
+              }}
+            >
+              <div>{activePoint.label}</div>
+              <div className="mt-0.5 text-[0.78rem] font-semibold">
+                {valueFormatter(activePoint.value)}
+              </div>
+            </div>
+          </div>
+
+          <div
+            className="relative overflow-hidden rounded-[20px] border border-slate-200/80 bg-white"
+            style={{ height: chartPixelHeight }}
+          >
             <svg
               viewBox="0 0 100 100"
               preserveAspectRatio="none"
@@ -127,7 +285,7 @@ function TimeSeriesChart({
               aria-hidden="true"
             >
               {yTicks.map((tick, index) => {
-                const y = top + chartHeight - (tick / maxValue) * chartHeight;
+                const y = top + chartHeight - (tick / axisMax) * chartHeight;
 
                 return (
                   <line
@@ -137,50 +295,95 @@ function TimeSeriesChart({
                     x2={100 - right}
                     y2={y}
                     stroke="rgba(148, 163, 184, 0.2)"
-                    strokeWidth="0.8"
                     strokeDasharray={index === yTicks.length - 1 ? "0" : "2.5 3.5"}
+                    strokeWidth="0.8"
                     vectorEffect="non-scaling-stroke"
                   />
                 );
               })}
+
+              <line
+                x1={activePoint.x}
+                y1={top}
+                x2={activePoint.x}
+                y2={100 - bottom}
+                stroke="rgba(100, 116, 139, 0.35)"
+                strokeDasharray="2.5 3.5"
+                strokeWidth="0.8"
+                vectorEffect="non-scaling-stroke"
+              />
 
               <path d={areaPath} fill={fillColor} opacity="0.18" />
               <path
                 d={linePath}
                 fill="none"
                 stroke={lineColor}
-                strokeWidth="2.5"
                 strokeLinecap="round"
                 strokeLinejoin="round"
+                strokeWidth="2.5"
                 vectorEffect="non-scaling-stroke"
               />
 
-              {coordinates.map((point) => (
+              {coordinates.map((point, index) => (
                 <circle
-                  key={point.label}
+                  key={`${point.label}-${index}`}
                   cx={point.x}
                   cy={point.y}
-                  r="1.35"
-                  fill={lineColor}
+                  fill={index === safeHoveredIndex ? "white" : lineColor}
+                  r={index === safeHoveredIndex ? "2.2" : "1.2"}
+                  stroke={lineColor}
+                  strokeWidth={index === safeHoveredIndex ? "1.6" : "0"}
+                  vectorEffect="non-scaling-stroke"
                 />
               ))}
-
-              <circle
-                cx={lastPoint.x}
-                cy={lastPoint.y}
-                r="2.4"
-                fill={lineColor}
-                stroke="white"
-                strokeWidth="1.2"
-                vectorEffect="non-scaling-stroke"
-              />
             </svg>
+
+            <div
+              className="absolute inset-0 grid"
+              style={{
+                gridTemplateColumns: `repeat(${points.length}, minmax(0, 1fr))`
+              }}
+            >
+              {points.map((point, index) => (
+                <button
+                  key={`${point.label}-hover-${index}`}
+                  aria-label={`${point.label}: ${valueFormatter(point.value)}`}
+                  className="h-full cursor-crosshair bg-transparent"
+                  onBlur={() => setHoveredIndex(points.length - 1)}
+                  onFocus={() => setHoveredIndex(index)}
+                  onMouseEnter={() => setHoveredIndex(index)}
+                  onMouseLeave={() => setHoveredIndex(points.length - 1)}
+                  type="button"
+                />
+              ))}
+            </div>
           </div>
 
-          <div className="mt-3 flex items-center justify-between text-[0.72rem] font-medium text-slate-500">
-            {xTickIndices.map((index) => (
-              <span key={`${points[index]?.label}-${index}`}>{points[index]?.label}</span>
-            ))}
+          <div className="relative mt-2 h-4 text-[0.54rem] font-medium text-slate-500">
+            {xTickIndices.map((index, tickOrder) => {
+              const isFirst = tickOrder === 0;
+              const isLast = tickOrder === xTickIndices.length - 1;
+
+              return (
+                <span
+                  key={`${points[index]?.label}-${index}`}
+                  className={
+                    isFirst
+                      ? "absolute left-0 whitespace-nowrap text-left"
+                      : isLast
+                        ? "absolute right-0 whitespace-nowrap text-right"
+                        : "absolute -translate-x-1/2 whitespace-nowrap text-center"
+                  }
+                  style={
+                    isFirst || isLast
+                      ? undefined
+                      : { left: `${coordinates[index]?.x}%` }
+                  }
+                >
+                  {points[index]?.label}
+                </span>
+              );
+            })}
           </div>
         </div>
       </div>
@@ -188,42 +391,156 @@ function TimeSeriesChart({
   );
 }
 
+function HoverBarList({
+  accentClass,
+  items,
+  widthBase,
+  title
+}: HoverBarListProps) {
+  const [hoveredIndex, setHoveredIndex] = useState(0);
+  const activeItem = items[Math.min(hoveredIndex, items.length - 1)] ?? items[0];
+  const maxValue = Math.max(...items.map((item) => item.value), 1);
+  const widthReference = Math.max(widthBase ?? maxValue, 1);
+
+  return (
+    <div className="rounded-[24px] border border-slate-900/8 bg-slate-50/80 p-4">
+      <div className="mb-3 flex items-start justify-between gap-3">
+        <div>
+          <p className="text-[0.66rem] font-bold uppercase tracking-[0.2em] text-slate-500">
+            {title}
+          </p>
+          <strong className="mt-1 block text-sm font-semibold text-slate-900">
+            {activeItem.label}
+          </strong>
+        </div>
+        <div className="text-right">
+          <strong className="block text-sm font-semibold text-slate-900">
+            {activeItem.valueLabel}
+          </strong>
+          <span className="text-[0.68rem] text-slate-500">{activeItem.helperText}</span>
+        </div>
+      </div>
+
+      <div className="grid gap-2.5">
+        {items.map((item, index) => {
+          const isActive = index === hoveredIndex;
+
+          return (
+            <button
+              key={`${item.label}-${index}`}
+              className={
+                isActive
+                  ? "grid grid-cols-[minmax(84px,0.9fr)_1fr_auto] items-center gap-3 rounded-2xl bg-white px-3 py-3 text-left shadow-sm ring-1 ring-slate-900/8"
+                  : "grid grid-cols-[minmax(84px,0.9fr)_1fr_auto] items-center gap-3 rounded-2xl px-3 py-3 text-left transition hover:bg-white/90"
+              }
+              onBlur={() => setHoveredIndex(0)}
+              onFocus={() => setHoveredIndex(index)}
+              onMouseEnter={() => setHoveredIndex(index)}
+              type="button"
+            >
+              <div className="min-w-0">
+                <span className="block truncate text-[0.7rem] font-semibold uppercase tracking-[0.12em] text-slate-500">
+                  {item.label}
+                </span>
+                <span className="mt-0.5 block truncate text-[0.68rem] text-slate-500">
+                  {item.helperText}
+                </span>
+              </div>
+
+              <div className="h-2 overflow-hidden rounded-full bg-slate-200/90">
+                <div
+                  className={`h-full rounded-full ${accentClass}`}
+                  style={{
+                    width: `${Math.max((item.value / widthReference) * 100, 10)}%`
+                  }}
+                />
+              </div>
+
+              <span className="text-[0.72rem] font-semibold text-slate-900">
+                {item.valueLabel}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 export function Dashboard({ data }: DashboardProps) {
   const [activeMetric, setActiveMetric] = useState<MetricKey>("clicks");
+  const [metricRange, setMetricRange] = useState<RangeKey>("14d");
+  const [bounceRange, setBounceRange] = useState<RangeKey>("14d");
+  const [financeRange, setFinanceRange] = useState<RangeKey>("14d");
+  const [journeyMetric, setJourneyMetric] = useState<JourneyMetricKey>("sessions");
+  const [pageMetric, setPageMetric] = useState<PageMetricKey>("visits");
 
   const currentMetric = data.metricCards[activeMetric];
+  const metricTrend = slicePoints(currentMetric.trend, metricRange);
+  const bounceTrend = slicePoints(data.bounceRateSeries, bounceRange);
+  const revenueTrend = slicePoints(data.finance.revenue.trend, financeRange);
+  const profitTrend = slicePoints(data.finance.profit.trend, financeRange);
+  const metricPeak = peakPoint(metricTrend);
+  const bouncePeak = peakPoint(bounceTrend);
+  const revenuePeak = peakPoint(revenueTrend);
+  const profitPeak = peakPoint(profitTrend);
+  const totalExitSessions = sumValues(data.exitJourney);
 
-  const maxJourneyValue = Math.max(...data.exitJourney.map((point) => point.value), 1);
-  const maxFinanceValue = Math.max(
-    ...data.finance.revenue.trend.map((point) => point.value),
-    ...data.finance.profit.trend.map((point) => point.value),
-    1
-  );
-  const metricAverage = averageValue(currentMetric.trend);
-  const metricPeak = peakPoint(currentMetric.trend);
-  const bouncePeak = peakPoint(data.bounceRateSeries);
-  const revenueAverage = averageValue(data.finance.revenue.trend);
-  const revenuePeak = peakPoint(data.finance.revenue.trend);
-  const profitAverage = averageValue(data.finance.profit.trend);
-  const profitPeak = peakPoint(data.finance.profit.trend);
+  const journeyItems: HoverBarListItem[] = data.exitJourney.map((point) => {
+    const shareValue = (point.value / Math.max(totalExitSessions, 1)) * 100;
+
+    return {
+      helperText:
+        journeyMetric === "sessions"
+          ? `${shareValue.toFixed(1)}% of all exits`
+          : `${point.value} sessions`,
+      label: point.label,
+      value: journeyMetric === "sessions" ? point.value : shareValue,
+      valueLabel:
+        journeyMetric === "sessions"
+          ? `${point.value} sessions`
+          : `${shareValue.toFixed(1)}%`
+    };
+  });
+
+  const pageItems: HoverBarListItem[] = data.topPages.map((page) => ({
+    helperText:
+      pageMetric === "visits"
+        ? `${page.share}% of tracked page views`
+        : `${page.visits.toLocaleString()} visits`,
+    label: page.page,
+    value: pageMetric === "visits" ? page.visits : page.share,
+    valueLabel:
+      pageMetric === "visits"
+        ? `${page.visits.toLocaleString()}`
+        : `${page.share}%`
+  }));
 
   return (
     <main className="mx-auto max-w-7xl px-4 py-8 sm:px-6 sm:py-10">
       <section className="grid gap-[18px] lg:grid-cols-3">
         <article className={panelClass}>
-          <div className="mb-[18px] flex items-start justify-between gap-4">
+          <div className="mb-[18px] flex flex-wrap items-start justify-between gap-4">
             <div>
               <p className={eyebrowClass}>Segment 1</p>
-              <h2 className="text-[1.45rem] font-semibold tracking-[-0.03em] text-slate-900">
+              <h2 className="text-[1.35rem] font-semibold tracking-[-0.03em] text-slate-900">
                 Clicks, Impressions, and CTR
               </h2>
             </div>
-            <span className={`${badgeClass} bg-slate-900/6 text-slate-900`}>
-              3-way filter
-            </span>
+
+            <DashboardSelect
+              ariaLabel="Metric zoom range"
+              onChange={setMetricRange}
+              options={rangeOptions}
+              value={metricRange}
+            />
           </div>
 
-          <div className="mb-5 grid grid-cols-1 gap-2 sm:grid-cols-3" role="tablist" aria-label="Metric filter">
+          <div
+            className="mb-5 grid grid-cols-1 gap-2 sm:grid-cols-3"
+            role="tablist"
+            aria-label="Metric filter"
+          >
             {metricKeys.map((metric) => (
               <button
                 key={metric}
@@ -235,51 +552,52 @@ export function Dashboard({ data }: DashboardProps) {
                 onClick={() => setActiveMetric(metric)}
                 role="tab"
                 aria-selected={metric === activeMetric}
+                type="button"
               >
-                <span className="block text-[0.72rem] font-bold uppercase tracking-[0.18em] opacity-70">
+                <span className="block text-[0.66rem] font-bold uppercase tracking-[0.18em] opacity-70">
                   {metricLabels[metric]}
                 </span>
-                <span className="mt-1 block text-xl font-semibold tracking-[-0.03em]">
+                <span className="mt-1 block text-lg font-semibold tracking-[-0.03em]">
                   {data.metricCards[metric].total}
                 </span>
               </button>
             ))}
           </div>
 
-          <div className="mb-5 flex flex-col gap-3 rounded-[22px] bg-[linear-gradient(135deg,rgba(13,148,136,0.1),rgba(255,255,255,0.85))] p-5">
+          <div className="mb-5 flex flex-col gap-3 rounded-[22px] bg-[linear-gradient(135deg,rgba(37,99,235,0.08),rgba(255,255,255,0.88))] p-5">
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div>
-                <p className="text-[0.72rem] font-bold uppercase tracking-[0.18em] text-slate-500">
-                  Active Trend
+                <p className="text-[0.66rem] font-bold uppercase tracking-[0.18em] text-slate-500">
+                  Selected Window
                 </p>
-                <strong className="mt-1 block text-[clamp(2rem,4vw,3rem)] font-semibold tracking-[-0.05em] text-slate-900">
-                  {currentMetric.total}
+                <strong className="mt-1 block text-[clamp(1.8rem,3vw,2.5rem)] font-semibold tracking-[-0.05em] text-slate-900">
+                  {formatMetricAggregate(activeMetric, metricTrend)}
                 </strong>
               </div>
               <div className="flex flex-wrap gap-2">
-                <span className="inline-flex rounded-full bg-teal-500/14 px-3 py-2 text-sm font-semibold text-teal-700">
+                <span className="inline-flex rounded-full bg-blue-500/12 px-3 py-2 text-[0.76rem] font-semibold text-blue-700">
                   {currentMetric.delta}
                 </span>
-                <span className="inline-flex rounded-full bg-slate-900/6 px-3 py-2 text-sm font-semibold text-slate-700">
+                <span className="inline-flex rounded-full bg-white/85 px-3 py-2 text-[0.76rem] font-semibold text-slate-700">
                   Peak {metricPeak.label}
                 </span>
               </div>
             </div>
 
             <div className="grid gap-2 sm:grid-cols-2">
-              <div className="rounded-2xl bg-white/70 px-4 py-3">
-                <p className="text-[0.7rem] font-bold uppercase tracking-[0.18em] text-slate-500">
+              <div className="rounded-2xl bg-white/75 px-4 py-3">
+                <p className="text-[0.66rem] font-bold uppercase tracking-[0.18em] text-slate-500">
                   Daily Average
                 </p>
-                <strong className="mt-1 block text-lg font-semibold text-slate-900">
-                  {formatMetricValue(activeMetric, metricAverage)}
+                <strong className="mt-1 block text-base font-semibold text-slate-900">
+                  {formatMetricValue(activeMetric, averageValue(metricTrend))}
                 </strong>
               </div>
-              <div className="rounded-2xl bg-white/70 px-4 py-3">
-                <p className="text-[0.7rem] font-bold uppercase tracking-[0.18em] text-slate-500">
+              <div className="rounded-2xl bg-white/75 px-4 py-3">
+                <p className="text-[0.66rem] font-bold uppercase tracking-[0.18em] text-slate-500">
                   Peak Value
                 </p>
-                <strong className="mt-1 block text-lg font-semibold text-slate-900">
+                <strong className="mt-1 block text-base font-semibold text-slate-900">
                   {formatMetricValue(activeMetric, metricPeak.value)}
                 </strong>
               </div>
@@ -287,255 +605,238 @@ export function Dashboard({ data }: DashboardProps) {
           </div>
 
           <TimeSeriesChart
-            points={currentMetric.trend}
-            lineColor="#2563eb"
             fillColor="#93c5fd"
+            lineColor="#2563eb"
+            points={metricTrend}
             valueFormatter={(value) => formatMetricValue(activeMetric, value)}
           />
 
-          <div className="mt-4 flex flex-wrap items-center justify-between gap-2 text-sm text-slate-500">
-            <span>Last 14 days</span>
-            <span>
-              Peak {formatMetricValue(activeMetric, metricPeak.value)} on {metricPeak.label}
-            </span>
+          <div className="mt-4 flex flex-wrap items-center justify-between gap-2 text-[0.76rem] text-slate-500">
+            <span>{formatRangeLabel(metricRange)}</span>
+            <span>{currentMetric.context}</span>
           </div>
         </article>
 
         <article className={panelClass}>
-          <div className="mb-[18px] flex items-start justify-between gap-4">
+          <div className="mb-[18px] flex flex-wrap items-start justify-between gap-4">
             <div>
               <p className={eyebrowClass}>Segment 2</p>
-              <h2 className="text-[1.45rem] font-semibold tracking-[-0.03em] text-slate-900">
+              <h2 className="text-[1.35rem] font-semibold tracking-[-0.03em] text-slate-900">
                 Bounce Rate
               </h2>
             </div>
-            <span className={`${badgeClass} bg-teal-500/12 text-teal-700`}>
-              {data.bounceRateAverage}
-            </span>
+
+            <div className="flex flex-wrap items-center gap-2">
+              <span className={`${badgeClass} bg-teal-500/12 text-teal-700`}>
+                {data.bounceRateAverage}
+              </span>
+              <DashboardSelect
+                ariaLabel="Bounce rate zoom range"
+                onChange={setBounceRange}
+                options={rangeOptions}
+                value={bounceRange}
+              />
+            </div>
           </div>
 
           <div className="mb-5 grid gap-2 sm:grid-cols-2">
             <div className="rounded-2xl bg-slate-900/4 px-4 py-3">
-              <p className="text-[0.7rem] font-bold uppercase tracking-[0.18em] text-slate-500">
-                Average
+              <p className="text-[0.66rem] font-bold uppercase tracking-[0.18em] text-slate-500">
+                Window Average
               </p>
-              <strong className="mt-1 block text-lg font-semibold text-slate-900">
-                {data.bounceRateAverage}
+              <strong className="mt-1 block text-base font-semibold text-slate-900">
+                {formatPercentValue(averageValue(bounceTrend))}
               </strong>
             </div>
             <div className="rounded-2xl bg-slate-900/4 px-4 py-3">
-              <p className="text-[0.7rem] font-bold uppercase tracking-[0.18em] text-slate-500">
+              <p className="text-[0.66rem] font-bold uppercase tracking-[0.18em] text-slate-500">
                 Highest Day
               </p>
-              <strong className="mt-1 block text-lg font-semibold text-slate-900">
+              <strong className="mt-1 block text-base font-semibold text-slate-900">
                 {bouncePeak.label} · {formatPercentValue(bouncePeak.value)}
               </strong>
             </div>
           </div>
 
           <TimeSeriesChart
-            points={data.bounceRateSeries}
-            lineColor="#f97316"
             fillColor="#fdba74"
+            lineColor="#f97316"
+            points={bounceTrend}
             valueFormatter={formatPercentValue}
           />
 
-          <div className="mt-4 flex flex-wrap items-center justify-between gap-2 text-sm text-slate-500">
-            <span>Last 14 days</span>
-            <span>Peak on {bouncePeak.label}</span>
+          <div className="mt-4 flex flex-wrap items-center justify-between gap-2 text-[0.76rem] text-slate-500">
+            <span>{formatRangeLabel(bounceRange)}</span>
+            <span>Hover to inspect daily bounce rate</span>
           </div>
         </article>
 
-        <article className={`${panelClass} grid grid-rows-[auto_auto_1fr]`}>
-          <div className="mb-[18px] flex items-start justify-between gap-4">
+        <article className={panelClass}>
+          <div className="mb-[18px] flex flex-wrap items-start justify-between gap-4">
             <div>
               <p className={eyebrowClass}>Segment 3</p>
-              <h2 className="text-[1.45rem] font-semibold tracking-[-0.03em] text-slate-900">
+              <h2 className="text-[1.35rem] font-semibold tracking-[-0.03em] text-slate-900">
                 Visit Depth Before Exit
               </h2>
             </div>
-            <span className={`${badgeClass} bg-slate-900/6 text-slate-900`}>
-              5 top pages
-            </span>
-          </div>
 
-          <div className="mb-4">
-            <div>
-              <p className={eyebrowClass}>Pages visited before leaving</p>
-              <div className="grid min-h-[150px] grid-cols-[repeat(5,minmax(0,1fr))] items-end gap-3">
-                {data.exitJourney.map((point) => (
-                  <div key={point.label} className="flex min-w-0 flex-col items-center gap-2">
-                    <div
-                      className="min-h-6 w-full rounded-t-full rounded-b-2xl bg-gradient-to-b from-orange-500 to-orange-500/35"
-                      style={{
-                        height: `${Math.max((point.value / maxJourneyValue) * 100, 12)}%`
-                      }}
-                    />
-                    <strong className="text-[0.8rem] font-semibold text-slate-900">
-                      {point.value}
-                    </strong>
-                    <span className="w-full truncate text-center text-[0.72rem] text-slate-500">
-                      {point.label}
-                    </span>
-                  </div>
-                ))}
-              </div>
+            <div className="flex flex-wrap gap-2">
+              <DashboardSelect
+                ariaLabel="Visit depth metric"
+                onChange={setJourneyMetric}
+                options={journeyMetricOptions}
+                value={journeyMetric}
+              />
+              <DashboardSelect
+                ariaLabel="Popular pages metric"
+                onChange={setPageMetric}
+                options={pageMetricOptions}
+                value={pageMetric}
+              />
             </div>
           </div>
 
-          <div className="mt-2">
-            <p className={eyebrowClass}>Most popular pages</p>
-            <div className="grid gap-3">
-              {data.topPages.map((page, index) => (
-                <div
-                  key={page.page}
-                  className="grid items-center gap-3 sm:grid-cols-[auto_1fr_minmax(120px,0.8fr)]"
-                >
-                  <div className="grid h-[34px] w-[34px] place-items-center rounded-xl bg-slate-900/8 text-sm font-semibold text-slate-900">
-                    {index + 1}
-                  </div>
-                  <div>
-                    <strong className="block text-[0.98rem] font-semibold text-slate-900">
-                      {page.page}
-                    </strong>
-                    <span className="text-[0.82rem] text-slate-500">
-                      {page.visits.toLocaleString()} visits
-                    </span>
-                  </div>
-                  <div className="h-2.5 overflow-hidden rounded-full bg-slate-900/8">
-                    <div
-                      className="h-full rounded-full bg-gradient-to-r from-teal-600/80 to-orange-500/80"
-                      style={{ width: `${page.share}%` }}
-                    />
-                  </div>
-                </div>
-              ))}
-            </div>
+          <div className="grid gap-4">
+            <HoverBarList
+              accentClass="bg-gradient-to-r from-orange-500 to-amber-400"
+              items={journeyItems}
+              title="Exit depth"
+              widthBase={journeyMetric === "sessions" ? totalExitSessions : 100}
+            />
+
+            <HoverBarList
+              accentClass="bg-gradient-to-r from-teal-600 to-cyan-400"
+              items={pageItems}
+              title="Top pages"
+              widthBase={pageMetric === "visits" ? data.totalPageViews : 100}
+            />
           </div>
         </article>
       </section>
 
-      <section className="mt-[18px] grid gap-[18px] lg:grid-cols-2">
-        <article className={panelClass}>
-          <div className="mb-[18px] flex items-start justify-between gap-4">
+      <section className="mx-auto mt-[18px] grid max-w-5xl gap-[18px] lg:grid-cols-2">
+        <article className={`${panelClass} mx-auto w-full max-w-[30rem]`}>
+          <div className="mb-[18px] flex flex-wrap items-start justify-between gap-4">
             <div>
-              <p className={eyebrowClass}>Segment 4</p>
-              <h2 className="text-[1.45rem] font-semibold tracking-[-0.03em] text-slate-900">
+              <p className={eyebrowClass}>Segment 4A</p>
+              <h2 className="text-[1.22rem] font-semibold tracking-[-0.03em] text-slate-900">
                 Revenue
               </h2>
             </div>
-            <span className={`${badgeClass} bg-blue-500/10 text-blue-700`}>
-              {data.finance.revenue.delta}
-            </span>
+
+            <div className="flex flex-wrap items-center gap-2">
+              <span className={`${badgeClass} bg-emerald-500/12 text-emerald-700`}>
+                {data.finance.revenue.delta}
+              </span>
+              <DashboardSelect
+                ariaLabel="Revenue zoom range"
+                onChange={setFinanceRange}
+                options={rangeOptions}
+                value={financeRange}
+              />
+            </div>
           </div>
 
-          <div className="mb-5 flex flex-wrap items-end justify-between gap-3 rounded-[22px] bg-[linear-gradient(135deg,rgba(13,148,136,0.1),rgba(255,255,255,0.85))] p-5">
+          <div className="mb-4 flex flex-wrap items-end justify-between gap-3 rounded-[22px] bg-[linear-gradient(135deg,rgba(16,185,129,0.08),rgba(255,255,255,0.9))] p-4">
             <div>
-              <p className="text-[0.72rem] font-bold uppercase tracking-[0.18em] text-slate-500">
-                14-Day Revenue
+              <p className="text-[0.66rem] font-bold uppercase tracking-[0.18em] text-slate-500">
+                Selected Revenue
               </p>
-              <strong className="mt-1 block text-[clamp(2rem,4vw,3rem)] font-semibold tracking-[-0.05em] text-slate-900">
-                {data.finance.revenue.total}
+              <strong className="mt-1 block text-[clamp(1.45rem,2.2vw,2rem)] font-semibold tracking-[-0.05em] text-slate-900">
+                {currencyFormatter.format(sumValues(revenueTrend))}
               </strong>
             </div>
-            <span className="inline-flex rounded-full bg-white/80 px-3 py-2 text-sm font-semibold text-slate-700">
+            <span className="inline-flex rounded-full bg-white/85 px-3 py-2 text-[0.76rem] font-semibold text-slate-700">
               Peak {revenuePeak.label}
             </span>
           </div>
 
-          <div className="grid min-h-[220px] grid-cols-[repeat(14,minmax(0,1fr))] items-end gap-3">
-            {data.finance.revenue.trend.map((point) => (
-              <div key={point.label} className="flex min-w-0 flex-col items-center gap-2">
-                <div
-                  className="min-h-[18px] w-full rounded-t-full rounded-b-2xl bg-gradient-to-b from-teal-700 to-teal-700/35"
-                  style={{
-                    height: `${Math.max((point.value / maxFinanceValue) * 100, 10)}%`
-                  }}
-                />
-                <span className="w-full truncate text-center text-[0.72rem] text-slate-500">
-                  {point.label}
-                </span>
-              </div>
-            ))}
-          </div>
+          <TimeSeriesChart
+            compact
+            fillColor="#6ee7b7"
+            lineColor="#059669"
+            points={revenueTrend}
+            valueFormatter={(value) => currencyFormatter.format(value)}
+          />
 
-          <div className="mt-5 grid gap-2 sm:grid-cols-2">
+          <div className="mt-4 grid gap-2 sm:grid-cols-2">
             <div className="rounded-2xl bg-slate-900/4 px-4 py-3">
-              <p className="text-[0.7rem] font-bold uppercase tracking-[0.18em] text-slate-500">
+              <p className="text-[0.66rem] font-bold uppercase tracking-[0.18em] text-slate-500">
                 Daily Average
               </p>
-              <strong className="mt-1 block text-lg font-semibold text-slate-900">
-                {currencyFormatter.format(revenueAverage)}
+              <strong className="mt-1 block text-base font-semibold text-slate-900">
+                {currencyFormatter.format(averageValue(revenueTrend))}
               </strong>
             </div>
             <div className="rounded-2xl bg-slate-900/4 px-4 py-3">
-              <p className="text-[0.7rem] font-bold uppercase tracking-[0.18em] text-slate-500">
+              <p className="text-[0.66rem] font-bold uppercase tracking-[0.18em] text-slate-500">
                 Peak Day
               </p>
-              <strong className="mt-1 block text-lg font-semibold text-slate-900">
+              <strong className="mt-1 block text-base font-semibold text-slate-900">
                 {currencyFormatter.format(revenuePeak.value)}
               </strong>
             </div>
           </div>
         </article>
 
-        <article className={panelClass}>
-          <div className="mb-[18px] flex items-start justify-between gap-4">
+        <article className={`${panelClass} mx-auto w-full max-w-[30rem]`}>
+          <div className="mb-[18px] flex flex-wrap items-start justify-between gap-4">
             <div>
-              <p className={eyebrowClass}>Segment 5</p>
-              <h2 className="text-[1.45rem] font-semibold tracking-[-0.03em] text-slate-900">
+              <p className={eyebrowClass}>Segment 4B</p>
+              <h2 className="text-[1.22rem] font-semibold tracking-[-0.03em] text-slate-900">
                 Profit
               </h2>
             </div>
-            <span className={`${badgeClass} bg-teal-500/12 text-teal-700`}>
-              {data.finance.margin}
-            </span>
+
+            <div className="flex flex-wrap items-center gap-2">
+              <span className={`${badgeClass} bg-blue-500/10 text-blue-700`}>
+                {data.finance.margin}
+              </span>
+              <DashboardSelect
+                ariaLabel="Profit zoom range"
+                onChange={setFinanceRange}
+                options={rangeOptions}
+                value={financeRange}
+              />
+            </div>
           </div>
 
-          <div className="mb-5 flex flex-wrap items-end justify-between gap-3 rounded-[22px] bg-[linear-gradient(135deg,rgba(29,78,216,0.1),rgba(255,255,255,0.88))] p-5">
+          <div className="mb-4 flex flex-wrap items-end justify-between gap-3 rounded-[22px] bg-[linear-gradient(135deg,rgba(37,99,235,0.08),rgba(255,255,255,0.9))] p-4">
             <div>
-              <p className="text-[0.72rem] font-bold uppercase tracking-[0.18em] text-slate-500">
-                14-Day Profit
+              <p className="text-[0.66rem] font-bold uppercase tracking-[0.18em] text-slate-500">
+                Selected Profit
               </p>
-              <strong className="mt-1 block text-[clamp(2rem,4vw,3rem)] font-semibold tracking-[-0.05em] text-slate-900">
-                {data.finance.profit.total}
+              <strong className="mt-1 block text-[clamp(1.45rem,2.2vw,2rem)] font-semibold tracking-[-0.05em] text-slate-900">
+                {currencyFormatter.format(sumValues(profitTrend))}
               </strong>
             </div>
-            <span className="inline-flex rounded-full bg-white/85 px-3 py-2 text-sm font-semibold text-slate-700">
+            <span className="inline-flex rounded-full bg-white/85 px-3 py-2 text-[0.76rem] font-semibold text-slate-700">
               {data.finance.profit.delta}
             </span>
           </div>
 
-          <div className="grid min-h-[220px] grid-cols-[repeat(14,minmax(0,1fr))] items-end gap-3">
-            {data.finance.profit.trend.map((point) => (
-              <div key={point.label} className="flex min-w-0 flex-col items-center gap-2">
-                <div
-                  className="min-h-[18px] w-full rounded-t-full rounded-b-2xl bg-gradient-to-b from-blue-700 to-blue-700/30"
-                  style={{
-                    height: `${Math.max((point.value / maxFinanceValue) * 100, 10)}%`
-                  }}
-                />
-                <span className="w-full truncate text-center text-[0.72rem] text-slate-500">
-                  {point.label}
-                </span>
-              </div>
-            ))}
-          </div>
+          <TimeSeriesChart
+            compact
+            fillColor="#93c5fd"
+            lineColor="#2563eb"
+            points={profitTrend}
+            valueFormatter={(value) => currencyFormatter.format(value)}
+          />
 
-          <div className="mt-5 grid gap-2 sm:grid-cols-2">
+          <div className="mt-4 grid gap-2 sm:grid-cols-2">
             <div className="rounded-2xl bg-slate-900/4 px-4 py-3">
-              <p className="text-[0.7rem] font-bold uppercase tracking-[0.18em] text-slate-500">
+              <p className="text-[0.66rem] font-bold uppercase tracking-[0.18em] text-slate-500">
                 Daily Average
               </p>
-              <strong className="mt-1 block text-lg font-semibold text-slate-900">
-                {currencyFormatter.format(profitAverage)}
+              <strong className="mt-1 block text-base font-semibold text-slate-900">
+                {currencyFormatter.format(averageValue(profitTrend))}
               </strong>
             </div>
             <div className="rounded-2xl bg-slate-900/4 px-4 py-3">
-              <p className="text-[0.7rem] font-bold uppercase tracking-[0.18em] text-slate-500">
+              <p className="text-[0.66rem] font-bold uppercase tracking-[0.18em] text-slate-500">
                 Peak Day
               </p>
-              <strong className="mt-1 block text-lg font-semibold text-slate-900">
+              <strong className="mt-1 block text-base font-semibold text-slate-900">
                 {currencyFormatter.format(profitPeak.value)}
               </strong>
             </div>

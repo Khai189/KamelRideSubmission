@@ -15,6 +15,7 @@ type MetricCard = {
 
 export type DashboardData = {
   totalEvents: number;
+  totalPageViews: number;
   totalSessions: number;
   bounceRateAverage: string;
   metricCards: Record<MetricKey, MetricCard>;
@@ -258,6 +259,7 @@ export function buildDashboardData(events: AnalyticsEvent[]): DashboardData {
 
   return {
     totalEvents: events.length,
+    totalPageViews,
     totalSessions: sessionEntries.length,
     bounceRateAverage: formatPercent(averageBounceRate),
     metricCards: {
