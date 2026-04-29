@@ -158,13 +158,30 @@ function buildXAxisTickIndices(pointCount: number, compact: boolean) {
     return [0];
   }
 
-  const targetLabelCount = compact ? 3 : 4;
-  const gap = lastIndex / (targetLabelCount - 1);
-  const indices = Array.from({ length: targetLabelCount }, (_, index) =>
-    Math.round(index * gap)
-  );
+  if (compact || pointCount <= 4) {
+    return [0, lastIndex];
+  }
 
-  return Array.from(new Set(indices));
+  return Array.from(new Set([0, Math.round(lastIndex / 2), lastIndex]));
+}
+
+function calculateDeltaLabel(points: TrendSeriesPoint[]) {
+  if (points.length < 2) {
+    return "+0.0%";
+  }
+
+  const midpoint = Math.max(Math.floor(points.length / 2), 1);
+  const previousTotal = sumValues(points.slice(0, midpoint));
+  const currentTotal = sumValues(points.slice(midpoint));
+
+  if (previousTotal === 0) {
+    return "+0.0%";
+  }
+
+  const delta = ((currentTotal - previousTotal) / previousTotal) * 100;
+  const sign = delta >= 0 ? "+" : "";
+
+  return `${sign}${delta.toFixed(1)}%`;
 }
 
 function DashboardSelect<T extends string>({
@@ -203,7 +220,7 @@ function TimeSeriesChart({
 }: TimeSeriesChartProps) {
   const [hoveredIndex, setHoveredIndex] = useState(points.length - 1);
 
-  const chartPixelHeight = compact ? 148 : 204;
+  const chartPixelHeight = compact ? 132 : 204;
   const maxValue = Math.max(...points.map((point) => point.value), 1);
   const { axisMax, ticks: yTicks } = buildAxisTicks(maxValue);
   const left = 7;
@@ -235,7 +252,7 @@ function TimeSeriesChart({
     <div
       className={
         compact
-          ? "relative z-0 mx-auto w-full max-w-[27rem] overflow-visible rounded-[24px] border border-slate-900/8 bg-slate-50/80 p-3 hover:z-20 focus-within:z-20"
+          ? "relative z-0 mx-auto w-full max-w-[23.5rem] overflow-visible rounded-[24px] border border-slate-900/8 bg-slate-50/80 p-3 hover:z-20 focus-within:z-20"
           : "relative z-0 overflow-visible rounded-[24px] border border-slate-900/8 bg-slate-50/80 p-3.5 hover:z-20 focus-within:z-20"
       }
     >
@@ -473,7 +490,7 @@ export function Dashboard({ data }: DashboardProps) {
   const [bounceRange, setBounceRange] = useState<RangeKey>("14d");
   const [financeRange, setFinanceRange] = useState<RangeKey>("14d");
   const [journeyMetric, setJourneyMetric] = useState<JourneyMetricKey>("sessions");
-  const [pageMetric, setPageMetric] = useState<PageMetricKey>("visits");
+  const [pageMetric, setPageMetric] = useState<PageMetricKey>("share");
 
   const currentMetric = data.metricCards[activeMetric];
   const metricTrend = slicePoints(currentMetric.trend, metricRange);
@@ -485,6 +502,12 @@ export function Dashboard({ data }: DashboardProps) {
   const revenuePeak = peakPoint(revenueTrend);
   const profitPeak = peakPoint(profitTrend);
   const totalExitSessions = sumValues(data.exitJourney);
+  const selectedBounceAverage = formatPercentValue(averageValue(bounceTrend));
+  const selectedRevenueDelta = calculateDeltaLabel(revenueTrend);
+  const selectedMargin =
+    sumValues(revenueTrend) === 0
+      ? "0.0% margin"
+      : `${formatPercentValue((sumValues(profitTrend) / sumValues(revenueTrend)) * 100)} margin`;
 
   const journeyItems: HoverBarListItem[] = data.exitJourney.map((point) => {
     const shareValue = (point.value / Math.max(totalExitSessions, 1)) * 100;
@@ -628,7 +651,7 @@ export function Dashboard({ data }: DashboardProps) {
 
             <div className="flex flex-wrap items-center gap-2">
               <span className={`${badgeClass} bg-teal-500/12 text-teal-700`}>
-                {data.bounceRateAverage}
+                {selectedBounceAverage}
               </span>
               <DashboardSelect
                 ariaLabel="Bounce rate zoom range"
@@ -698,24 +721,24 @@ export function Dashboard({ data }: DashboardProps) {
 
           <div className="grid gap-4">
             <HoverBarList
+              accentClass="bg-gradient-to-r from-teal-600 to-cyan-400"
+              items={pageItems}
+              title="Top pages"
+              widthBase={pageMetric === "share" ? 100 : undefined}
+            />
+
+            <HoverBarList
               accentClass="bg-gradient-to-r from-orange-500 to-amber-400"
               items={journeyItems}
               title="Exit depth"
               widthBase={journeyMetric === "sessions" ? totalExitSessions : 100}
             />
-
-            <HoverBarList
-              accentClass="bg-gradient-to-r from-teal-600 to-cyan-400"
-              items={pageItems}
-              title="Top pages"
-              widthBase={pageMetric === "visits" ? data.totalPageViews : 100}
-            />
           </div>
         </article>
       </section>
 
-      <section className="mx-auto mt-[18px] grid max-w-5xl gap-[18px] lg:grid-cols-2">
-        <article className={`${panelClass} mx-auto w-full max-w-[30rem]`}>
+      <section className="mx-auto mt-[18px] grid max-w-4xl gap-[18px] lg:grid-cols-2">
+        <article className={`${panelClass} mx-auto w-full max-w-[25rem]`}>
           <div className="mb-[18px] flex flex-wrap items-start justify-between gap-4">
             <div>
               <p className={eyebrowClass}>Segment 4A</p>
@@ -726,7 +749,7 @@ export function Dashboard({ data }: DashboardProps) {
 
             <div className="flex flex-wrap items-center gap-2">
               <span className={`${badgeClass} bg-emerald-500/12 text-emerald-700`}>
-                {data.finance.revenue.delta}
+                {selectedRevenueDelta}
               </span>
               <DashboardSelect
                 ariaLabel="Revenue zoom range"
@@ -742,7 +765,7 @@ export function Dashboard({ data }: DashboardProps) {
               <p className="text-[0.66rem] font-bold uppercase tracking-[0.18em] text-slate-500">
                 Selected Revenue
               </p>
-              <strong className="mt-1 block text-[clamp(1.45rem,2.2vw,2rem)] font-semibold tracking-[-0.05em] text-slate-900">
+              <strong className="mt-1 block text-[clamp(1.3rem,1.8vw,1.7rem)] font-semibold tracking-[-0.05em] text-slate-900">
                 {currencyFormatter.format(sumValues(revenueTrend))}
               </strong>
             </div>
@@ -779,7 +802,7 @@ export function Dashboard({ data }: DashboardProps) {
           </div>
         </article>
 
-        <article className={`${panelClass} mx-auto w-full max-w-[30rem]`}>
+        <article className={`${panelClass} mx-auto w-full max-w-[25rem]`}>
           <div className="mb-[18px] flex flex-wrap items-start justify-between gap-4">
             <div>
               <p className={eyebrowClass}>Segment 4B</p>
@@ -790,7 +813,7 @@ export function Dashboard({ data }: DashboardProps) {
 
             <div className="flex flex-wrap items-center gap-2">
               <span className={`${badgeClass} bg-blue-500/10 text-blue-700`}>
-                {data.finance.margin}
+                {selectedMargin}
               </span>
               <DashboardSelect
                 ariaLabel="Profit zoom range"
@@ -806,7 +829,7 @@ export function Dashboard({ data }: DashboardProps) {
               <p className="text-[0.66rem] font-bold uppercase tracking-[0.18em] text-slate-500">
                 Selected Profit
               </p>
-              <strong className="mt-1 block text-[clamp(1.45rem,2.2vw,2rem)] font-semibold tracking-[-0.05em] text-slate-900">
+              <strong className="mt-1 block text-[clamp(1.3rem,1.8vw,1.7rem)] font-semibold tracking-[-0.05em] text-slate-900">
                 {currencyFormatter.format(sumValues(profitTrend))}
               </strong>
             </div>
